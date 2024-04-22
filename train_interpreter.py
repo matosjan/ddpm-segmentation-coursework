@@ -93,7 +93,7 @@ def evaluation(args, models):
         uncertainty_scores.append(uncertainty_score.item())
     
     save_predictions(args, dataset.image_paths, preds)
-    miou = compute_iou(args, preds, gts)
+    miou = compute_iou(args, preds, gts, dataset.image_paths)
     print(f'Overall mIoU: ', miou)
     print(f'Mean uncertainty: {sum(uncertainty_scores) / len(uncertainty_scores)}')
 
@@ -197,8 +197,8 @@ if __name__ == '__main__':
     if not all(pretrained):
         # train all remaining models
         opts['start_model_num'] = sum(pretrained)
+        print(torch.cuda.is_available())
         train(opts)
-    
     print('Loading pretrained models...')
     models = load_ensemble(opts, device='cuda')
     evaluation(opts, models)

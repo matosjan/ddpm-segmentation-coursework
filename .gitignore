@@ -3,7 +3,8 @@
 *.pt
 *.pth
 pixel_classifiers
-
+runs
+*.sbatch
 *.npy
 *.jpg
 *.png

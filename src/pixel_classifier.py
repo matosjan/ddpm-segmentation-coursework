@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from collections import Counter
+import pandas as pd
 
 from torch.distributions import Categorical
 from src.utils import colorize_mask, oht_to_scalar
@@ -123,7 +124,7 @@ def save_predictions(args, image_paths, preds):
         )
 
 
-def compute_iou(args, preds, gts, print_per_class_ious=True):
+def compute_iou(args, preds, gts, image_paths, print_per_class_ious=True):
     class_names = get_class_names(args['category'])
 
     ids = range(args['number_class'])
@@ -131,15 +132,31 @@ def compute_iou(args, preds, gts, print_per_class_ious=True):
     unions = Counter()
     intersections = Counter()
 
-    for pred, gt in zip(preds, gts):
+    df = pd.DataFrame()
+    
+
+    for i, (pred, gt) in enumerate(zip(preds, gts)):
+        temp_dict = dict()
+        temp_dict['filename'] = image_paths[i].split('/')[-1].split('.')[0]
+        class_iou_array = []
         for target_num in ids:
             if target_num == args['ignore_label']: 
                 continue
+
             preds_tmp = (pred == target_num).astype(int)
             gts_tmp = (gt == target_num).astype(int)
+            
+            class_iou = (preds_tmp & gts_tmp).sum() / (1e-8 + (preds_tmp | gts_tmp).sum())
+            temp_dict[class_names[target_num]] = class_iou
+            if gts_tmp.sum() != 0:
+                class_iou_array.append(class_iou)
             unions[target_num] += (preds_tmp | gts_tmp).sum()
             intersections[target_num] += (preds_tmp & gts_tmp).sum()
+        
+        temp_dict['mIoU'] = sum(class_iou_array) / len(class_iou_array)
+        df = pd.concat([df, pd.DataFrame(temp_dict, index=[0])], ignore_index = True)
     
+    df.to_csv(os.path.join(args['exp_dir'], 'predictions', 'metrics.csv'), encoding='utf-8', index=False)
     ious = []
     for target_num in ids:
         if target_num == args['ignore_label']: 
