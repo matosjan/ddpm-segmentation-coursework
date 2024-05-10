@@ -235,6 +235,8 @@ def collect_features(args, activations: List[torch.Tensor], sample_idx=0):
     """ Upsample activations and concatenate them to form a feature tensor """
     assert all([isinstance(acts, torch.Tensor) for acts in activations])
     size = tuple(args['dim'][:-1])
+    print(size)
+
     resized_activations = []
     for feats in activations:
         feats = feats[sample_idx][None]

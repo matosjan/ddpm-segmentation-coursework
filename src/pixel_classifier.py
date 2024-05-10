@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 from collections import Counter
 import pandas as pd
+import cv2
 
 from torch.distributions import Categorical
 from src.utils import colorize_mask, oht_to_scalar
@@ -19,9 +20,11 @@ class pixel_classifier(nn.Module):
             self.layers = nn.Sequential(
                 nn.Linear(dim, 128),
                 nn.ReLU(),
+                # nn.Dropout(p=0.2),
                 nn.BatchNorm1d(num_features=128),
-                nn.Linear(128, 32),
+                nn.Linear(128, 32), # ТОДО dropout
                 nn.ReLU(),
+                # nn.Dropout(p=0.2),
                 nn.BatchNorm1d(num_features=32),
                 nn.Linear(32, numpy_class)
             )
@@ -29,9 +32,11 @@ class pixel_classifier(nn.Module):
             self.layers = nn.Sequential(
                 nn.Linear(dim, 256),
                 nn.ReLU(),
+                # nn.Dropout(p=0.2),
                 nn.BatchNorm1d(num_features=256),
                 nn.Linear(256, 128),
                 nn.ReLU(),
+                # nn.Dropout(p=0.2),
                 nn.BatchNorm1d(num_features=128),
                 nn.Linear(128, numpy_class)
             )
@@ -67,6 +72,45 @@ class pixel_classifier(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
+def predict_labels_conv(args, models, features, size):
+    if isinstance(features, np.ndarray):
+        features = torch.from_numpy(features)
+    
+    mean_seg = None
+    all_seg = []
+    all_entropy = []
+    seg_mode_ensemble = []
+
+    softmax_f = nn.Softmax(dim=1)
+    with torch.no_grad():
+        for MODEL_NUMBER in range(len(models)):
+            new_features = models[MODEL_NUMBER][1](features).view(args['dim'][-1], -1).permute(1, 0)
+            preds = models[MODEL_NUMBER][0](new_features.cuda())
+            entropy = Categorical(logits=preds).entropy()
+            all_entropy.append(entropy)
+            all_seg.append(preds)
+
+            if mean_seg is None:
+                mean_seg = softmax_f(preds)
+            else:
+                mean_seg += softmax_f(preds)
+
+            img_seg = oht_to_scalar(preds)
+            img_seg = img_seg.reshape(*size)
+            img_seg = img_seg.cpu().detach()
+
+            seg_mode_ensemble.append(img_seg)
+
+        mean_seg = mean_seg / len(all_seg)
+
+        full_entropy = Categorical(mean_seg).entropy()
+
+        js = full_entropy - torch.mean(torch.stack(all_entropy), 0)
+        top_k = js.sort()[0][- int(js.shape[0] / 10):].mean()
+
+        img_seg_final = torch.stack(seg_mode_ensemble, dim=-1)
+        img_seg_final = torch.mode(img_seg_final, 2)[0]
+    return img_seg_final, top_k
 
 def predict_labels(models, features, size):
     if isinstance(features, np.ndarray):
@@ -108,23 +152,24 @@ def predict_labels(models, features, size):
     return img_seg_final, top_k
 
 
-def save_predictions(args, image_paths, preds):
+def save_predictions(args, image_paths, preds, epoch=''):
     palette = get_palette(args['category'])
-    os.makedirs(os.path.join(args['exp_dir'], 'predictions'), exist_ok=True)
-    os.makedirs(os.path.join(args['exp_dir'], 'visualizations'), exist_ok=True)
+    os.makedirs(os.path.join(args['exp_dir'], 'predictions' + epoch), exist_ok=True)
+    os.makedirs(os.path.join(args['exp_dir'], 'visualizations' + epoch), exist_ok=True)
 
     for i, pred in enumerate(preds):
         filename = image_paths[i].split('/')[-1].split('.')[0]
         pred = np.squeeze(pred)
-        np.save(os.path.join(args['exp_dir'], 'predictions', filename + '.npy'), pred)
+
+        np.save(os.path.join(args['exp_dir'], 'predictions' + epoch, filename + '.npy'), pred)
 
         mask = colorize_mask(pred, palette)
         Image.fromarray(mask).save(
-            os.path.join(args['exp_dir'], 'visualizations', filename + '.jpg')
+            os.path.join(args['exp_dir'], 'visualizations' + epoch, filename + '.jpg')
         )
 
 
-def compute_iou(args, preds, gts, image_paths, print_per_class_ious=True):
+def compute_iou(args, preds, gts, image_paths, print_per_class_ious=True, epoch=''):
     class_names = get_class_names(args['category'])
 
     ids = range(args['number_class'])
@@ -156,7 +201,7 @@ def compute_iou(args, preds, gts, image_paths, print_per_class_ious=True):
         temp_dict['mIoU'] = sum(class_iou_array) / len(class_iou_array)
         df = pd.concat([df, pd.DataFrame(temp_dict, index=[0])], ignore_index = True)
     
-    df.to_csv(os.path.join(args['exp_dir'], 'predictions', 'metrics.csv'), encoding='utf-8', index=False)
+    # df.to_csv(os.path.join(args['exp_dir'], f'predictions{epoch}', 'metrics.csv'), encoding='utf-8', index=False)
     ious = []
     for target_num in ids:
         if target_num == args['ignore_label']: 
@@ -164,6 +209,10 @@ def compute_iou(args, preds, gts, image_paths, print_per_class_ious=True):
         iou = intersections[target_num] / (1e-8 + unions[target_num])
         ious.append(iou)
         if print_per_class_ious:
+            # with open(os.path.join(args['exp_dir'], 'miou_test.txt'), "a") as file:
+            #     file.write(f"IOU for {class_names[target_num]} {iou:.4}\n")
+            # with open(os.path.join(args['exp_dir'], f'predictions{epoch}', 'miou.txt'), "a") as file:
+            #     file.write(f"IOU for {class_names[target_num]} {iou:.4}\n")
             print(f"IOU for {class_names[target_num]} {iou:.4}")
     return np.array(ious).mean()
 
@@ -177,4 +226,24 @@ def load_ensemble(args, device='cpu'):
         model.load_state_dict(state_dict)
         model = model.module.to(device)
         models.append(model.eval())
+    return models
+
+def load_ensemble_convs(args, device='cpu'):
+    models = []
+    for i in range(args['model_num']):
+        model_path = os.path.join(args['exp_dir'], f'model_{i}.pth')
+        state_dict = torch.load(model_path)['model_state_dict']
+        model = nn.DataParallel(pixel_classifier(args["number_class"], args['dim'][-1]))
+        model.load_state_dict(state_dict)
+        model = model.module.to(device)
+
+        state_dict = torch.load(model_path)['conv_state_dict']
+        convs = nn.Sequential(
+            nn.Conv2d(args['dim'][-1], args['dim'][-1], (3, 3), dilation=3, padding=3, groups=8448),
+            nn.Conv2d(args['dim'][-1], args['dim'][-1], (1, 1)),
+        )
+        convs.load_state_dict(state_dict)
+        convs = convs.to(device)
+
+        models.append([model.eval(), convs.eval()])
     return models

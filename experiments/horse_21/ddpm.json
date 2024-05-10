@@ -15,12 +15,15 @@
     "steps": [50, 150, 250],
     "blocks": [5, 6, 7, 8, 12],
   
-    "model_num": 10,
+    "model_num": 2,
     "batch_size": 64,
     "max_training": 30,
     
     "training_number": 30,
     "testing_number": 30,
+
+    "postprocessing": false,
+    "augmentation_scale": 1,
   
     "upsample_mode":"bilinear",
     "share_noise": true,

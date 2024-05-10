@@ -13,7 +13,7 @@ def make_transform(model_type: str, resolution: int):
         transform = transforms.Compose([
             transforms.Resize(resolution),
             transforms.ToTensor(),
-            lambda x: 2 * x - 1
+            lambda x: 2 * x - 1,
         ])
     elif model_type in ['mae', 'swav', 'swav_w2', 'deeplab']:
         transform = transforms.Compose([
@@ -49,6 +49,57 @@ class FeatureDataset(Dataset):
 
     def __len__(self):
         return len(self.X_data)
+    
+class AugmentingDataset(Dataset):
+    ''' 
+    :param data_dir: path to a folder with images and their annotations. 
+                     Annotations are supposed to be in *.npy format.
+    :param resolution: image and mask output resolution.
+    :param num_images: restrict a number of images in the dataset.
+    :param transform: image transforms.
+    '''
+    def __init__(
+        self,
+        data_dir: str,
+        resolution: int,
+        num_images= -1,
+        img_mask_transform=None
+    ):
+        super().__init__()
+        self.resolution = resolution
+        self.img_mask_transform = img_mask_transform
+        self.image_paths = _list_image_files_recursively(data_dir)
+        self.image_paths = sorted(self.image_paths)
+
+        if num_images > 0:
+            print(f"Take first {num_images} images...")
+            self.image_paths = self.image_paths[:num_images]
+
+        self.label_paths = [
+            '.'.join(image_path.split('.')[:-1] + ['npy'])
+            for image_path in self.image_paths
+        ]
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        # Load an image
+        image_path = self.image_paths[idx]
+        image = cv2.imread(image_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        assert image.shape[0] == image.shape[1], \
+               f"Only square images are supported: ({image.size[0]}, {image.size[1]})"
+        
+        # Load a corresponding mask and resize it to (self.resolution, self.resolution)
+        label_path = self.label_paths[idx]
+        label = np.load(label_path).astype('uint8')
+        transformed = self.img_mask_transform(image=image, mask=label)
+        # print(type(transformed['image']), type(transformed['mask']))
+        # print(transformed['image'].shape)
+        # print(transformed['mask'].shape)
+
+        return transformed['image'], transformed['mask'], image_path
 
 
 class ImageLabelDataset(Dataset):
@@ -100,7 +151,7 @@ class ImageLabelDataset(Dataset):
             label, (self.resolution, self.resolution), interpolation=cv2.INTER_NEAREST
         )
         tensor_label = torch.from_numpy(label)
-        return tensor_image, tensor_label
+        return tensor_image, tensor_label, image_path
 
 
 class InMemoryImageLabelDataset(Dataset):
