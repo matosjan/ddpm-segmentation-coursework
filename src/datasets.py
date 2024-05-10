@@ -41,8 +41,8 @@ class FeatureDataset(Dataset):
         X_data: torch.Tensor, 
         y_data: torch.Tensor
     ):    
-        self.X_data = X_data
-        self.y_data = y_data
+        self.X_data = X_data.to('cuda')
+        self.y_data = y_data.to('cuda')
 
     def __getitem__(self, index):
         return self.X_data[index], self.y_data[index]

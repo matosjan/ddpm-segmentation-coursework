@@ -20,11 +20,11 @@ class pixel_classifier(nn.Module):
             self.layers = nn.Sequential(
                 nn.Linear(dim, 128),
                 nn.ReLU(),
-                # nn.Dropout(p=0.2),
+                nn.Dropout(p=0.4),
                 nn.BatchNorm1d(num_features=128),
                 nn.Linear(128, 32), # ТОДО dropout
                 nn.ReLU(),
-                # nn.Dropout(p=0.2),
+                nn.Dropout(p=0.4),
                 nn.BatchNorm1d(num_features=32),
                 nn.Linear(32, numpy_class)
             )
@@ -32,11 +32,11 @@ class pixel_classifier(nn.Module):
             self.layers = nn.Sequential(
                 nn.Linear(dim, 256),
                 nn.ReLU(),
-                # nn.Dropout(p=0.2),
+                nn.Dropout(p=0.4),
                 nn.BatchNorm1d(num_features=256),
                 nn.Linear(256, 128),
                 nn.ReLU(),
-                # nn.Dropout(p=0.2),
+                nn.Dropout(p=0.4),
                 nn.BatchNorm1d(num_features=128),
                 nn.Linear(128, numpy_class)
             )
